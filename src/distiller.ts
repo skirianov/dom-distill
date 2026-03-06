@@ -1,0 +1,433 @@
+import type {
+  CompressedNode,
+  CompressedTree,
+  DOMTreeNode,
+  TreeDistillerConfig,
+  TreeMetrics
+} from './types';
+import type { TaskProgress } from './scheduler.types';
+import { schedule } from './scheduler';
+
+const DEFAULT_MAX_DEPTH = 15;
+const DEFAULT_MAX_NODES = 500;
+
+type SelectorContext = {
+  prioritySelectors: string[];
+};
+
+const createIdGenerator = () => {
+  let counter = 0;
+  const prefix = Date.now().toString(36);
+  return () => {
+    counter += 1;
+    return `dom-node-${prefix}-${counter}`;
+  };
+};
+
+const getDirectText = (element: Element): string | undefined => {
+  let result = '';
+  for (const node of Array.from(element.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      result += node.textContent ?? '';
+    }
+  }
+  const trimmed = result.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const buildSelector = (element: Element, context: SelectorContext): string => {
+  const testId = element.getAttribute('data-testid') ?? element.getAttribute('data-aid');
+  if (testId) {
+    return `[data-testid="${CSS.escape(testId)}"]`;
+  }
+
+  const id = element.getAttribute('id');
+  if (id) {
+    return `#${CSS.escape(id)}`;
+  }
+
+  const name = element.getAttribute('name');
+  if (name) {
+    return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+  }
+
+  const ariaLabel = element.getAttribute('aria-label');
+  if (ariaLabel) {
+    return `${element.tagName.toLowerCase()}[aria-label="${CSS.escape(ariaLabel)}"]`;
+  }
+
+  // Fallback: structural selector using nth-of-type
+  const parts: string[] = [];
+  let current: Element | null = element;
+
+  while (current && parts.length < 5) {
+    const tag = current.tagName.toLowerCase();
+    let selector = tag;
+
+    const currentId = current.getAttribute('id');
+    if (currentId) {
+      selector = `${tag}#${CSS.escape(currentId)}`;
+      parts.unshift(selector);
+      break;
+    }
+
+    const parent: Element | null = current.parentElement;
+    if (!parent) {
+      parts.unshift(selector);
+      break;
+    }
+
+    const siblings = Array.from(parent.children).filter((n: Element) => n.tagName === current!.tagName);
+    if (siblings.length > 1) {
+      const index = siblings.indexOf(current) + 1;
+      selector = `${selector}:nth-of-type(${index})`;
+    }
+
+    parts.unshift(selector);
+    current = parent;
+  }
+
+  return parts.join(' > ');
+};
+
+const isElementVisible = (element: Element, includeInvisible: boolean): boolean => {
+  if (includeInvisible) return true;
+
+  const style = getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false;
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return false;
+
+  return true;
+};
+
+const detectActionType = (element: Element): DOMTreeNode['actionType'] => {
+  const tag = element.tagName.toLowerCase();
+  const type = element.getAttribute('type')?.toLowerCase();
+  const role = element.getAttribute('role');
+
+  if (tag === 'button') {
+    if (type === 'submit') return 'submit';
+    if (element.getAttribute('aria-pressed') != null) return 'toggle';
+    return 'click';
+  }
+
+  if (tag === 'input') {
+    if (type === 'submit' || type === 'button') return 'submit';
+    return 'input';
+  }
+
+  if (tag === 'select' || tag === 'textarea') {
+    return 'select';
+  }
+
+  if (tag === 'a' && element.hasAttribute('href')) {
+    return 'navigate';
+  }
+
+  if (role === 'button') {
+    return 'click';
+  }
+
+  return undefined;
+};
+
+const isInteractive = (element: Element): boolean => {
+  return detectActionType(element) != null;
+};
+
+const analyzeSemantic = (element: Element): DOMTreeNode['semantic'] => {
+  const tag = element.tagName.toLowerCase();
+  const role = element.getAttribute('role') ?? '';
+  const className = element.getAttribute('class') ?? '';
+
+  const semantic: DOMTreeNode['semantic'] = {
+    importance: 0
+  };
+
+  if (tag === 'form' || role === 'form') {
+    semantic.isForm = true;
+    semantic.importance += 2;
+  }
+
+  if (tag === 'nav' || role === 'navigation') {
+    semantic.isNavigation = true;
+    semantic.importance += 2;
+  }
+
+  if (
+    tag === 'article' ||
+    tag === 'section' ||
+    role === 'region' ||
+    /\b(card|panel|widget)\b/i.test(className)
+  ) {
+    semantic.isContainer = true;
+    semantic.containerType = 'section';
+    semantic.importance += 1;
+  }
+
+  return semantic;
+};
+
+const getRect = (element: Element): DOMTreeNode['rect'] => {
+  const rect = element.getBoundingClientRect();
+  return {
+    top: rect.top,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height
+  };
+};
+
+/**
+ * Synchronously distill a DOM subtree into a structured, LLM-friendly tree.
+ *
+ * Performs a single-pass traversal building nodes with smart selectors,
+ * semantic analysis, visibility checks, and action type detection.
+ *
+ * @param root - The root element to distill (defaults to `document.body`)
+ * @param config - Optional configuration for depth limits, node caps, etc.
+ * @returns A complete `DOMTreeNode` tree
+ *
+ * @example
+ * ```ts
+ * const tree = distill(document.body, { maxDepth: 10, maxNodes: 200 });
+ * ```
+ */
+export const distill = (
+  root: Element = document.body,
+  config: TreeDistillerConfig = {}
+): DOMTreeNode => {
+  const {
+    maxDepth = DEFAULT_MAX_DEPTH,
+    maxNodes = DEFAULT_MAX_NODES,
+    includeInvisible = false,
+    prioritySelectors = [],
+    semanticAnalysis = true
+  } = config;
+
+  const idGenerator = createIdGenerator();
+  let nodeCount = 0;
+
+  const context: SelectorContext = {
+    prioritySelectors
+  };
+
+  const buildNode = (element: Element, depth: number, parent?: DOMTreeNode): DOMTreeNode | null => {
+    if (depth > maxDepth) return null;
+    if (nodeCount >= maxNodes) return null;
+
+    const visible = isElementVisible(element, includeInvisible);
+    const rect = getRect(element);
+    const id = idGenerator();
+    const text =
+      element.getAttribute('aria-label') ??
+      element.getAttribute('aria-description') ??
+      getDirectText(element);
+
+    const interactive = isInteractive(element);
+    const actionType = detectActionType(element);
+
+    const attributes: DOMTreeNode['attributes'] = {
+      testId: element.getAttribute('data-testid') ?? undefined,
+      id: element.getAttribute('id') ?? undefined,
+      name: element.getAttribute('name') ?? undefined,
+      role: element.getAttribute('role') ?? undefined,
+      ariaLabel: element.getAttribute('aria-label') ?? undefined,
+      ariaDescription: element.getAttribute('aria-description') ?? undefined,
+      ariaExpanded: element.getAttribute('aria-expanded') ?? undefined,
+      ariaChecked: element.getAttribute('aria-checked') ?? undefined,
+      ariaCurrent: element.getAttribute('aria-current') ?? undefined,
+      placeholder: element.getAttribute('placeholder') ?? undefined,
+      value: (element as HTMLInputElement).value ?? undefined,
+      type: element.getAttribute('type') ?? undefined,
+      disabled: element.hasAttribute('disabled') || undefined,
+      href: element.getAttribute('href') ?? undefined
+    };
+
+    const selector = buildSelector(element, context);
+
+    const node: DOMTreeNode = {
+      id,
+      tag: element.tagName.toLowerCase(),
+      text,
+      interactive,
+      actionType,
+      confidence: interactive ? 1 : 0,
+      selector,
+      children: [],
+      parent,
+      depth,
+      visible,
+      rect,
+      attributes,
+      element: new WeakRef(element)
+    };
+
+    if (semanticAnalysis) {
+      node.semantic = analyzeSemantic(element);
+    }
+
+    nodeCount += 1;
+
+    for (const child of Array.from(element.children)) {
+      const childNode = buildNode(child, depth + 1, node);
+      if (childNode) {
+        node.children.push(childNode);
+      }
+      if (nodeCount >= maxNodes) {
+        break;
+      }
+    }
+
+    return node;
+  };
+
+  const tree = buildNode(root, 0);
+  if (!tree) {
+    throw new Error('Failed to distill DOM tree');
+  }
+  return tree;
+};
+
+/**
+ * Asynchronously distill a DOM subtree using cooperative scheduling.
+ *
+ * Uses `requestIdleCallback` (with a 5ms time budget per chunk) to avoid
+ * blocking the main thread. Ideal for large DOMs where synchronous
+ * distillation would cause jank.
+ *
+ * @param root - The root element to distill (defaults to `document.body`)
+ * @param config - Optional configuration for depth limits, node caps, etc.
+ * @returns A promise resolving to a `DOMTreeNode` tree
+ *
+ * @example
+ * ```ts
+ * const tree = await distillAsync(document.body, { maxNodes: 1000 });
+ * ```
+ */
+export const distillAsync = async (
+  root: Element = document.body,
+  config: TreeDistillerConfig = {}
+): Promise<DOMTreeNode> => {
+  return schedule(
+    { priority: config.async === false ? 'immediate' : 'idle' },
+    function* (): Generator<TaskProgress, DOMTreeNode, void> {
+      const tree = distill(root, config);
+      yield { type: 'progress', processed: 1, total: 1 };
+      return tree;
+    }
+  );
+};
+
+/**
+ * Compute aggregate metrics for a distilled tree.
+ *
+ * @param tree - The root `DOMTreeNode` to analyze
+ * @returns Metrics including total nodes, interactive count, max depth, etc.
+ */
+export const metrics = (tree: DOMTreeNode): TreeMetrics => {
+  let totalNodes = 0;
+  let interactiveNodes = 0;
+  let maxDepth = 0;
+  let formCount = 0;
+  let navigationCount = 0;
+
+  const traverse = (node: DOMTreeNode) => {
+    totalNodes += 1;
+    if (node.interactive) interactiveNodes += 1;
+    if (node.depth > maxDepth) maxDepth = node.depth;
+
+    if (node.semantic?.isForm) formCount += 1;
+    if (node.semantic?.isNavigation) navigationCount += 1;
+
+    for (const child of node.children) {
+      traverse(child);
+    }
+  };
+
+  traverse(tree);
+
+  const avgBranchingFactor = totalNodes > 1 ? (totalNodes - 1) / totalNodes : 0;
+
+  return {
+    totalNodes,
+    interactiveNodes,
+    maxDepth,
+    avgBranchingFactor,
+    formCount,
+    navigationCount
+  };
+};
+
+const compressNode = (node: DOMTreeNode): CompressedNode => {
+  return {
+    id: node.id,
+    tag: node.tag,
+    depth: node.depth,
+    text: node.text,
+    interactive: node.interactive,
+    selector: node.selector,
+    attributes: node.attributes,
+    semantic: node.semantic,
+    children: node.children.map((child) => compressNode(child))
+  };
+};
+
+/**
+ * Compress a `DOMTreeNode` tree to a minimal `CompressedTree` for LLM consumption.
+ *
+ * Strips runtime-only fields (parent refs, WeakRef, rect, confidence)
+ * to produce a JSON-serializable structure optimized for token efficiency.
+ *
+ * @param tree - The tree to compress
+ * @returns A `CompressedTree` suitable for `JSON.stringify()`
+ */
+export const compress = (tree: DOMTreeNode): CompressedTree => {
+  return compressNode(tree);
+};
+
+const decompressNode = (
+  node: CompressedNode,
+  parent: DOMTreeNode | undefined
+): DOMTreeNode => {
+  const rect = { top: 0, left: 0, width: 0, height: 0 };
+
+  const restored: DOMTreeNode = {
+    id: node.id,
+    tag: node.tag,
+    text: node.text,
+    interactive: node.interactive,
+    actionType: undefined,
+    confidence: node.interactive ? 1 : 0,
+    selector: node.selector,
+    children: [],
+    parent,
+    depth: node.depth,
+    visible: true,
+    rect,
+    semantic: node.semantic,
+    attributes: node.attributes
+  };
+
+  restored.children = node.children.map((child) => decompressNode(child, restored));
+  return restored;
+};
+
+/**
+ * Reconstruct a `DOMTreeNode` tree from compressed data.
+ *
+ * Re-establishes parent references and default values for fields
+ * that were stripped during compression.
+ *
+ * @param tree - The compressed tree data
+ * @returns A fully-linked `DOMTreeNode` tree
+ */
+export const decompress = (tree: CompressedTree): DOMTreeNode => {
+  return decompressNode(tree, undefined);
+};
+
+

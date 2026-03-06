@@ -1,0 +1,65 @@
+{
+    "name": "dom-distill",
+    "version": "0.1.0",
+    "description": "Token-efficient DOM-to-tree distiller for LLMs and browser automation.",
+    "private": false,
+    "main": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "sideEffects": false,
+    "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
+        "check-types": "tsc --noEmit",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "dom",
+        "llm",
+        "tree",
+        "agent",
+        "browser",
+        "automation",
+        "ai",
+        "playwright",
+        "puppeteer",
+        "web-scraping",
+        "token-optimization"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/skirianov/dom-distill.git"
+    },
+    "homepage": "https://github.com/skirianov/dom-distill#readme",
+    "bugs": {
+        "url": "https://github.com/skirianov/dom-distill/issues"
+    },
+    "author": "Sergii Kirianov",
+    "license": "MIT",
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "devDependencies": {
+        "@types/jsdom": "^28.0.0",
+        "@types/node": "^25.3.5",
+        "@vitest/coverage-v8": "^1.6.0",
+        "jsdom": "^24.1.3",
+        "ts-node": "^10.9.2",
+        "tsup": "^8.5.1",
+        "typescript": "^5.9.2",
+        "vitest": "^1.6.1"
+    }
+}
