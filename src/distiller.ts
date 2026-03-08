@@ -129,6 +129,11 @@ const selectorConfidence = (element: Element): number => {
 const isElementVisible = (element: Element, includeInvisible: boolean): boolean => {
   if (includeInvisible) return true;
 
+  // ARIA hidden elements are intended to be skipped by assistive tech and usually AI agents
+  if (element.getAttribute('aria-hidden') === 'true') {
+    return false;
+  }
+
   const style = getComputedStyle(element);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
     return false;
@@ -143,9 +148,9 @@ const isElementVisible = (element: Element, includeInvisible: boolean): boolean 
 const detectActionType = (element: Element): DOMTreeNode['actionType'] => {
   const tag = element.tagName.toLowerCase();
   const type = element.getAttribute('type')?.toLowerCase();
-  const role = element.getAttribute('role');
+  const role = element.getAttribute('role')?.toLowerCase();
 
-  if (tag === 'button') {
+  if (tag === 'button' || role === 'button') {
     if (type === 'submit') return 'submit';
     if (element.getAttribute('aria-pressed') != null) return 'toggle';
     return 'click';
@@ -153,26 +158,29 @@ const detectActionType = (element: Element): DOMTreeNode['actionType'] => {
 
   if (tag === 'input') {
     if (type === 'submit' || type === 'button') return 'submit';
+    if (type === 'checkbox' || type === 'radio') return 'click';
     return 'input';
   }
 
-  if (tag === 'select' || tag === 'textarea') {
-    return 'select';
+  if (tag === 'select' || tag === 'textarea' || role === 'textbox' || role === 'searchbox') {
+    return 'input';
+  }
+
+  if (element.hasAttribute('contenteditable') && element.getAttribute('contenteditable') !== 'false') {
+    return 'input';
   }
 
   if (tag === 'a' && element.hasAttribute('href')) {
     return 'navigate';
   }
 
-  if (role === 'button') {
-    return 'click';
-  }
-
   return undefined;
 };
 
 const isInteractive = (element: Element): boolean => {
-  return detectActionType(element) != null;
+  if (detectActionType(element) != null) return true;
+  if (element.hasAttribute('contenteditable') && element.getAttribute('contenteditable') !== 'false') return true;
+  return false;
 };
 
 const analyzeSemantic = (element: Element): DOMTreeNode['semantic'] => {
@@ -187,6 +195,11 @@ const analyzeSemantic = (element: Element): DOMTreeNode['semantic'] => {
   if (tag === 'form' || role === 'form') {
     semantic.isForm = true;
     semantic.importance += 2;
+  }
+
+  if (tag === 'dialog' || role === 'dialog' || role === 'alertdialog') {
+    semantic.isOverlay = true;
+    semantic.importance += 5;
   }
 
   if (tag === 'nav' || role === 'navigation') {
@@ -282,7 +295,8 @@ export const distill = (
       value: (element as HTMLInputElement).value || undefined,
       type: element.getAttribute('type') ?? undefined,
       disabled: element.hasAttribute('disabled') || undefined,
-      href: element.getAttribute('href') ?? undefined
+      href: element.getAttribute('href') ?? undefined,
+      contenteditable: element.getAttribute('contenteditable') ?? undefined
     };
 
     const selector = buildSelector(element, context);
@@ -309,6 +323,12 @@ export const distill = (
     }
 
     nodeCount += 1;
+
+    // Optimization: Skip recursion for hidden subtrees to save node limit budget
+    const computedStyle = getComputedStyle(element);
+    if ((computedStyle.display === 'none' || element.getAttribute('aria-hidden') === 'true') && !includeInvisible) {
+      return node;
+    }
 
     for (const child of Array.from(element.children)) {
       const childNode = buildNode(child, depth + 1, node);
@@ -400,6 +420,12 @@ export const distillAsync = async (
             parent.children.push(node);
           }
 
+          // Optimization: Skip pushing children to stack if the subtree is hidden
+          const style = getComputedStyle(element);
+          if ((style.display === 'none' || element.getAttribute('aria-hidden') === 'true') && !includeInvisible) {
+            continue;
+          }
+
           // Push children in reverse for correct traversal order
           const kids = Array.from(element.children);
           for (let i = kids.length - 1; i >= 0; i--) {
@@ -454,7 +480,8 @@ const buildNodeShallow = (
     value: (element as HTMLInputElement).value || undefined,
     type: element.getAttribute('type') ?? undefined,
     disabled: element.hasAttribute('disabled') || undefined,
-    href: element.getAttribute('href') ?? undefined
+    href: element.getAttribute('href') ?? undefined,
+    contenteditable: element.getAttribute('contenteditable') ?? undefined
   };
 
   const selector = buildSelector(element, context);

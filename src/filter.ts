@@ -40,8 +40,21 @@ export const calculateInteractionRank = (node: DOMTreeNode): number => {
     rank += 3;
   }
 
-  if (attrs.role === 'button' || attrs.role === 'menuitem') {
-    rank += 2;
+  const role = attrs.role?.toLowerCase();
+  if (role === 'button' || role === 'menuitem' || role === 'link') {
+    rank += 3;
+  }
+
+  if (role === 'textbox' || role === 'searchbox' || role === 'combobox') {
+    rank += 3;
+  }
+
+  if (role === 'checkbox' || role === 'radio' || role === 'switch') {
+    rank += 3;
+  }
+
+  if (attrs.contenteditable === 'true' || attrs.contenteditable === '') {
+    rank += 3;
   }
 
   if (attrs.href) {
@@ -109,7 +122,8 @@ export const filter = (
           href: node.attributes?.href,
           role: node.attributes?.role,
           type: node.attributes?.type,
-          value: node.attributes?.value
+          value: node.attributes?.value,
+          contenteditable: node.attributes?.contenteditable
         }
       };
       result.push(distilled);

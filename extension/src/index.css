@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+    --color-background: #0d0f17;
+    --color-glass: rgba(26, 30, 46, 0.6);
+    --color-glass-border: rgba(255, 255, 255, 0.08);
+    --color-primary: #6366f1;
+    --color-primary-glow: rgba(99, 102, 241, 0.4);
+    --color-accent: #10b981;
+    --color-danger: #ef4444;
+}
+
+@layer components {
+    .glass-panel {
+        @apply bg-glass backdrop-blur-md border border-glass-border;
+    }
+
+    .primary-btn {
+        @apply bg-primary text-white border-none rounded-md px-3 py-2 cursor-pointer font-medium transition duration-200 hover:brightness-110 shadow-md shadow-primary-glow;
+    }
+
+    .run-btn {
+        @apply bg-primary flex items-center justify-center text-white border-none rounded-lg w-10 h-10 cursor-pointer transition-all duration-200 shadow shadow-primary-glow hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 disabled:opacity-50 disabled:-translate-y-0 disabled:cursor-not-allowed;
+    }
+
+    .stop-btn {
+        @apply bg-danger flex items-center justify-center text-white border-none rounded-lg w-10 h-10 cursor-pointer transition-all duration-200 shadow-md shadow-danger/40 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0;
+    }
+
+    .log-entry {
+        @apply bg-white/5 border border-glass-border p-3 rounded-lg text-sm mb-2 break-words animate-[slideIn_0.3s_ease-out_forwards];
+    }
+
+    .log-entry-system {
+        @apply border-l-2 border-l-gray-400;
+    }
+
+    .log-entry-user {
+        @apply border-l-2 border-l-primary bg-primary/5;
+    }
+
+    .log-entry-action {
+        @apply border-l-2 border-l-accent font-mono;
+    }
+
+    .log-entry-error {
+        @apply border-l-2 border-l-danger bg-danger/5;
+    }
+
+    ::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        @apply bg-white/10 rounded-sm;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        @apply bg-white/20;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

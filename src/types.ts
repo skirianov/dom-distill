@@ -57,6 +57,7 @@ export interface DOMTreeNode {
     type?: string;
     disabled?: boolean;
     href?: string;
+    contenteditable?: string;
   };
   fingerprint?: string;
   /**
@@ -118,6 +119,7 @@ export interface DistilledNode {
     type?: string;
     value?: string;
     for?: string;
+    contenteditable?: string;
   };
   fingerprint?: string;
 }
