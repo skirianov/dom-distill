@@ -2,20 +2,28 @@
 
 Token-efficient DOM-to-tree distiller for LLMs and browser automation.
 
-## The problem it solves for AI Agents
+## The Problem
 
-Right now, open-source AI agents (like AutoGPT, Skyvern, or standard browser-use scripts) struggle with the same massive bottleneck: **bloated DOMs.**
+AI agents that browse the web (AutoGPT, Skyvern, browser-use, etc.) hit the same bottleneck: **bloated DOMs.**
 
-A modern React or Next.js app often contains **2,000+ DOM nodes**. If you serialize that and send it to current-generation models like Claude 4.6 Sonnet/Opus, Gemini 3.1, or GPT-5.4, it consumes **~100,000 to 150,000 tokens** per step. 
-- It burns through API credits.
-- It destroys request latency.
-- It confuses the model with thousands of hidden `<div>`, `<svg>`, and `<style>` tags.
+A typical React/Next.js page has 2,000+ nodes. Serialize that and send it to an LLM, and you're burning **100k–180k tokens per step** — most of it hidden `<div>`s, `<svg>`s, and `<style>` tags the model can't act on anyway.
 
-**`dom-distill` is a zero-dependency, pure-TypeScript extraction engine.** You inject it directly into the browser context (e.g. via Playwright `page.evaluate`), and it runs a single, screaming-fast pass to convert the DOM into a minimal, semantic, structured JSON array containing *only* what an LLM needs to take action.
+`dom-distill` is a zero-dependency TypeScript engine that runs inside the browser (`page.evaluate`) and converts the DOM into a minimal, structured JSON array of only the nodes an LLM needs to take action.
 
-## What the LLM sees
+## Results
 
-If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG blobs, and a footer newsletter form, the LLM doesn't see 800 lines of HTML. It sees this:
+Live benchmarks running `dom-distill` against real sites via Playwright:
+
+| Site | Raw Nodes | Raw Tokens | → Filtered Nodes | Filtered Tokens | **Reduction** |
+|---|---|---|---|---|---|
+| **GitHub** | 1,908 | ~147k | 115 | ~4.6k | **96.8%** |
+| **Stripe** | 2,438 | ~180k | 192 | ~9.4k | **94.8%** |
+| **React Docs** | 1,846 | ~68k | 139 | ~6.4k | **90.7%** |
+| **Hacker News** | 807 | ~8.6k | 226 | ~10.2k | n/a (already minimal) |
+
+## What the LLM Sees
+
+Instead of 2,000 nodes of raw HTML, the LLM gets a clean array like this:
 
 ```json
 [
@@ -26,14 +34,6 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "rank": 6,
     "confidence": 1.0,
     "attributes": { "testId": "nav-home", "href": "/" }
-  },
-  {
-    "id": "dom-node-mmeytkdf-6",
-    "text": "Pricing",
-    "selector": "[data-testid=\"nav-pricing\"]",
-    "rank": 6,
-    "confidence": 1.0,
-    "attributes": { "testId": "nav-pricing", "href": "/pricing" }
   },
   {
     "id": "dom-node-mmeytkdf-12",
@@ -49,18 +49,14 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "rank": 6,
     "confidence": 0.9,
     "attributes": { "name": "email", "placeholder": "you@example.com", "type": "email" }
-  },
-  {
-    "id": "dom-node-mmeytkdf-22",
-    "text": "Subscribe",
-    "selector": "form#newsletter-form > button",
-    "rank": 3,
-    "confidence": 0.3,
-    "attributes": { "type": "submit" }
   }
 ]
 ```
-*Each node includes a `confidence` score (0–1) indicating selector stability, and deterministic CSS selectors the LLM can use directly: `click("[data-testid=\"nav-pricing\"]")`.*
+
+Each node includes:
+- **`selector`** — Deterministic CSS selector the LLM can act on: `click("[data-testid=\"nav-home\"]")`
+- **`rank`** — InteractionRank score (0–10+) based on tag semantics, ARIA roles, and attributes
+- **`confidence`** — Selector stability score (0–1): how likely the selector survives DOM changes
 
 ## Install
 
@@ -68,7 +64,35 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
 npm install dom-distill
 ```
 
-## Quick start
+## Quick Start
+
+### With Playwright
+
+```typescript
+import { chromium } from 'playwright';
+import { readFileSync } from 'fs';
+
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('https://example.com');
+
+// Inject and run dom-distill in the browser context
+const bundle = readFileSync('node_modules/dom-distill/dist/index.js', 'utf8');
+
+const result = await page.evaluate((code) => {
+  const exports = {};
+  const module = { exports };
+  new Function('exports', 'module', code)(exports, module);
+  const { distill, filter } = module.exports;
+
+  const tree = distill(document.body, { maxDepth: 15, maxNodes: 500 });
+  return filter(tree, { minRank: 2 });
+}, bundle);
+
+console.log(result); // Clean, actionable nodes for your LLM
+```
+
+### In-Browser
 
 ```typescript
 import { distill, filter, compress, diff } from 'dom-distill';
@@ -79,9 +103,8 @@ const tree = distill(document.body, { maxDepth: 10, maxNodes: 500 });
 // 2. Filter to high-value interactive elements
 const nodes = filter(tree, { minRank: 2 });
 
-// 3. Compress for LLM consumption
+// 3. Compress for LLM consumption (strips WeakRefs, parent refs)
 const payload = compress(tree);
-// → JSON.stringify(payload) is ~98% smaller than raw DOM
 
 // 4. Incremental updates via diffing
 const nextNodes = filter(distill(document.body), { minRank: 2 });
@@ -117,58 +140,42 @@ const delta = diff(nodes, nextNodes);
 | `fingerprintTree(nodes)` | Hash an entire node array |
 | `diff(prev, next)` | Three-way delta: changed / appeared / disappeared |
 
-### React Integration (optional, tree-shakeable)
+### React Integration (tree-shakeable)
 
 | Function | Description |
 |---|---|
 | `enhanceTreeWithFiber(tree)` | Walk React Fiber tree for component names, props, patterns |
 | `findReactComponents(tree, name?)` | Find components by name |
+| `getComponentHierarchy(node)` | Get the component ancestry path |
 | `analyzeReactPatterns(tree)` | Count forms, modals, dropdowns, etc. |
 
-## How it works
+## How It Works
 
-- **Single-pass construction** — One DFS walk builds the tree with selectors, semantic tags, visibility checks, and action type detection. No second pass.
-- **InteractionRank scoring** — Each node gets a 0–10+ score based on tag semantics, ARIA roles, attributes, and visibility. Only high-value nodes survive filtering.
-- **Selector confidence** — Every node receives a 0–1 stability score reflecting how likely the generated selector is to survive DOM mutations: `data-testid` → 1.0, `id` → 0.9, `name` → 0.8, `aria-label` → 0.7, structural fallback → 0.3.
-- **Cooperative scheduling** — `distillAsync` performs genuinely chunked traversal, yielding every 50 nodes via `requestIdleCallback` (5ms budget). The main thread never blocks, even on 10k-node DOMs.
-- **Fingerprint-based diffing** — Stable node hashes enable three-way diffs (changed/appeared/disappeared) for incremental LLM updates instead of full-tree resends.
-- **React Fiber integration** — Optional `enhanceTreeWithFiber()` walks the internal Fiber tree to extract component names, sanitized props, and structural patterns (forms, modals, portals). Fully tree-shakeable — doesn't ship if you don't import it.
+- **Single-pass construction** — One DFS walk builds the tree with smart selectors, semantic tags, visibility checks, and action type detection.
+- **InteractionRank scoring** — Each node scores 0–10+ based on tag semantics (`button` +3, `href` +3), ARIA roles (`role="button"` +2), and attributes. Invisible nodes score 0. Only high-ranking nodes survive filtering.
+- **Selector confidence** — Every selector gets a stability score: `data-testid` → 1.0, `id` → 0.9, `name` → 0.8, `aria-label` → 0.7, structural `nth-of-type` → 0.3. Agents can use this to prefer stable selectors.
+- **Cooperative scheduling** — `distillAsync` performs genuinely chunked traversal (stack-based DFS, yielding every 50 nodes via `requestIdleCallback`). No main-thread blocking, even on 10k+ node DOMs.
+- **Fingerprint diffing** — Stable node hashes enable three-way diffs (changed / appeared / disappeared) for incremental LLM updates instead of full-tree resends.
+- **React Fiber integration** — Optional `enhanceTreeWithFiber()` walks `__reactFiber$` internals to extract component names, sanitized props (passwords/API keys redacted), and structural patterns. Fully tree-shakeable — excluded from the bundle if not imported.
 
-## Benchmarks
+## Try It
 
-Real-world test running `dom-distill` on the live DOM of popular sites:
-
-| Site | Raw DOM Nodes | Raw Tokens (html) | Distill Time | Filtered Nodes | Filtered Tokens | Token Reduction |
-|---|---|---|---|---|---|---|
-| **GitHub Homepage** | ~1,800 | ~140k | ~50ms | 217 | ~8,800 | **93.7%** |
-| **Stripe** | ~2,000 | ~156k | ~65ms | 206 | ~10k | **93.5%** |
-| **React Docs** | ~1,800 | ~68k | ~65ms | 172 | ~7,500 | **88.9%** |
-| **GitHub Repo** | ~2,000 | ~82k | ~40ms | 219 | ~9,300 | **88.7%** |
-| **Wikipedia** | ~3,200 | ~54k | ~300ms | 1,006 | ~42k | **22.3%** (Link dense) |
-| **Hacker News** | ~800 | ~8.6k | ~130ms | 227 | ~10k | **—** (Text dense) |
-
-*Measured on Node.js using `jsdom` with `maxDepth: 30`, `maxNodes: 5000`.*
-
-## Try it
-
-Run the live demo against real websites using Playwright:
+Run the live demo against real websites:
 
 ```bash
-git clone https://github.com/skirianov/dom-distill.git
-cd dom-distill
-npm install
-npm run build
+git clone https://github.com/skirianov/dom-distill.git && cd dom-distill
+npm install && npm run build
 npm install --save-dev playwright tsx && npx playwright install chromium
 npx tsx examples/demo.ts
 ```
 
-Or test against any URL:
+Or point it at any URL:
 
 ```bash
 npx tsx examples/demo.ts https://stripe.com
 ```
 
-## Zero dependencies
+## Zero Dependencies
 
 No runtime dependencies. Pure TypeScript, browser APIs only. Ships ESM + CJS + full type declarations.
 
