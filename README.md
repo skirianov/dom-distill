@@ -2,7 +2,9 @@
 
 Token-efficient DOM-to-tree distiller for LLMs and browser automation.
 
-![dom-distill demo](examples/demo-dom-distill.gif)
+<p align="center">
+  <img src="examples/demo-dom-distill.gif" alt="dom-distill demo" width="720" />
+</p>
 
 ## The Problem
 
