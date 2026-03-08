@@ -1,0 +1,12 @@
+# Exclude development and extension files from npm package
+extension/
+tests/
+examples/
+scripts/
+benchmark.ts
+vitest.config.ts
+tsup.config.ts
+tsconfig.json
+.DS_Store
+.git/
+.gitignore
