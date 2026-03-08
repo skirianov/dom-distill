@@ -35,6 +35,19 @@ const getDirectText = (element: Element): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+/**
+ * Fallback text extraction: uses `textContent` to capture text from
+ * nested children (e.g. `<a><svg/><span>Issues</span></a>`).
+ * Capped at 80 chars to avoid pulling entire paragraph bodies.
+ */
+const getVisibleText = (element: Element): string | undefined => {
+  const raw = element.textContent?.trim();
+  if (!raw || raw.length === 0) return undefined;
+  // Collapse whitespace runs and cap length
+  const clean = raw.replace(/\s+/g, ' ');
+  return clean.length > 80 ? clean.slice(0, 80) + '…' : clean;
+};
+
 const buildSelector = (element: Element, context: SelectorContext): string => {
   const testId = element.getAttribute('data-testid') ?? element.getAttribute('data-aid');
   if (testId) {
@@ -249,7 +262,8 @@ export const distill = (
     const text =
       element.getAttribute('aria-label') ??
       element.getAttribute('aria-description') ??
-      getDirectText(element);
+      getDirectText(element) ??
+      getVisibleText(element);
 
     const interactive = isInteractive(element);
     const actionType = detectActionType(element);
@@ -420,7 +434,8 @@ const buildNodeShallow = (
   const text =
     element.getAttribute('aria-label') ??
     element.getAttribute('aria-description') ??
-    getDirectText(element);
+    getDirectText(element) ??
+    getVisibleText(element);
 
   const interactive = isInteractive(element);
   const actionType = detectActionType(element);
