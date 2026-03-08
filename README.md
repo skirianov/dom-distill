@@ -149,6 +149,25 @@ Real-world test running `dom-distill` on the live DOM of popular sites:
 
 *Measured on Node.js using `jsdom` with `maxDepth: 30`, `maxNodes: 5000`.*
 
+## Try it
+
+Run the live demo against real websites using Playwright:
+
+```bash
+git clone https://github.com/skirianov/dom-distill.git
+cd dom-distill
+npm install
+npm run build
+npm install --save-dev playwright tsx && npx playwright install chromium
+npx tsx examples/demo.ts
+```
+
+Or test against any URL:
+
+```bash
+npx tsx examples/demo.ts https://stripe.com
+```
+
 ## Zero dependencies
 
 No runtime dependencies. Pure TypeScript, browser APIs only. Ships ESM + CJS + full type declarations.
