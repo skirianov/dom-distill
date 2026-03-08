@@ -101,7 +101,7 @@ if (!window._DOM_DISTILL_AGENT_INJECTED) {
                 el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                 el.click();
 
-                await sleep(3000);
+                await sleep(500);
                 return `Clicked "${action.selector}"`;
 
             case 'type':
@@ -175,7 +175,7 @@ if (!window._DOM_DISTILL_AGENT_INJECTED) {
                     form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
                 }
 
-                await sleep(2000);
+                await sleep(500);
                 return `Typed "${action.text}" and submitted`;
 
             case 'press_key':

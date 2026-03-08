@@ -76,7 +76,7 @@ export default function SessionView({ session, settings }: { session: SessionSta
                 <div className="flex gap-4">
                     <div className="flex flex-col">
                         <span className="text-gray-500 uppercase tracking-wider text-[10px] font-semibold">Tokens Saved</span>
-                        <span className="font-mono text-accent font-medium">{session.stats.savingsPct}</span>
+                        <span className="font-mono text-accent font-medium">{session.stats.savingsPct}%</span>
                     </div>
                     <div className="flex flex-col">
                         <span className="text-gray-500 uppercase tracking-wider text-[10px] font-semibold">Distilled</span>

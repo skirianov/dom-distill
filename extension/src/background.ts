@@ -287,11 +287,21 @@ async function runAgent(sessionId: string, tabId: number, task: string, chatHist
                     sendLog(sessionId, 'System', res.result, 'system');
                     consecutiveFailures = 0;
                 } catch (err: any) {
-                    sendLog(sessionId, 'System', `Action failed: ${err.message}`, 'error');
-                    previousActions.push(`FAILED: ${err.message}`);
-                    consecutiveFailures++;
-                    if (consecutiveFailures >= 3) {
-                        throw new Error(`3 consecutive failures. Stopping.`);
+                    const isBFCacheError = err.message.includes('back/forward cache') || err.message.includes('message channel closed');
+                    const isNavAction = action.type === 'click' || action.type === 'type_and_submit' || action.type === 'press_key';
+
+                    if (isBFCacheError && isNavAction) {
+                        const msg = `Action triggered navigation (channel closed by bfcache)`;
+                        previousActions.push(msg);
+                        sendLog(sessionId, 'System', msg, 'system');
+                        consecutiveFailures = 0;
+                    } else {
+                        sendLog(sessionId, 'System', `Action failed: ${err.message}`, 'error');
+                        previousActions.push(`FAILED: ${err.message}`);
+                        consecutiveFailures++;
+                        if (consecutiveFailures >= 3) {
+                            throw new Error(`3 consecutive failures. Stopping.`);
+                        }
                     }
                 }
             }
