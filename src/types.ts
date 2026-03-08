@@ -116,6 +116,7 @@ export interface DistilledNode {
     href?: string;
     role?: string;
     type?: string;
+    value?: string;
     for?: string;
   };
   fingerprint?: string;

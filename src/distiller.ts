@@ -279,7 +279,7 @@ export const distill = (
       ariaChecked: element.getAttribute('aria-checked') ?? undefined,
       ariaCurrent: element.getAttribute('aria-current') ?? undefined,
       placeholder: element.getAttribute('placeholder') ?? undefined,
-      value: (element as HTMLInputElement).value ?? undefined,
+      value: (element as HTMLInputElement).value || undefined,
       type: element.getAttribute('type') ?? undefined,
       disabled: element.hasAttribute('disabled') || undefined,
       href: element.getAttribute('href') ?? undefined
@@ -451,7 +451,7 @@ const buildNodeShallow = (
     ariaChecked: element.getAttribute('aria-checked') ?? undefined,
     ariaCurrent: element.getAttribute('aria-current') ?? undefined,
     placeholder: element.getAttribute('placeholder') ?? undefined,
-    value: (element as HTMLInputElement).value ?? undefined,
+    value: (element as HTMLInputElement).value || undefined,
     type: element.getAttribute('type') ?? undefined,
     disabled: element.hasAttribute('disabled') || undefined,
     href: element.getAttribute('href') ?? undefined

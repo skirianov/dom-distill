@@ -1,6 +1,6 @@
 {
     "name": "dom-distill",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "description": "Token-efficient DOM-to-tree distiller for LLMs and browser automation.",
     "private": false,
     "main": "./dist/index.js",

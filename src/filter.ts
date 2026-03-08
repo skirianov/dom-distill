@@ -108,7 +108,8 @@ export const filter = (
           placeholder: node.attributes?.placeholder,
           href: node.attributes?.href,
           role: node.attributes?.role,
-          type: node.attributes?.type
+          type: node.attributes?.type,
+          value: node.attributes?.value
         }
       };
       result.push(distilled);
