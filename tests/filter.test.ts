@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { distill } from '../src/distiller';
-import { filter, calculateInteractionRank } from '../src/filter';
+import { filter, filterAsync, calculateInteractionRank } from '../src/filter';
 import type { DOMTreeNode } from '../src/types';
 
 describe('filter', () => {
@@ -47,5 +47,24 @@ describe('filter', () => {
     };
     // Invisible resets rank to 0
     expect(calculateInteractionRank(hiddenNode)).toBe(0);
+  });
+
+  it('filterAsync returns same results as sync filter', async () => {
+    container.innerHTML = '<a href="/link">Link</a><div>Noise</div><button>Btn</button>';
+    const tree = distill(container);
+
+    const syncResult = filter(tree, { minRank: 2 });
+    const asyncResult = await filterAsync(tree, { minRank: 2 });
+
+    expect(asyncResult.length).toBe(syncResult.length);
+    expect(asyncResult.map(n => n.id)).toEqual(syncResult.map(n => n.id));
+  });
+
+  it('returns empty array for tree with no qualifying nodes', () => {
+    container.innerHTML = '<div><div><div>Just text</div></div></div>';
+    const tree = distill(container);
+    const result = filter(tree, { minRank: 5 });
+
+    expect(result).toHaveLength(0);
   });
 });

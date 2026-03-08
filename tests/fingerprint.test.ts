@@ -49,4 +49,40 @@ describe('fingerprint', () => {
     expect(map.has('a')).toBe(true);
     expect(map.get('a')).toBe(fingerprintNode(nodes[0]!));
   });
+
+  it('diff returns empty delta when arrays are identical', () => {
+    const nodes: DistilledNode[] = [
+      { id: 'a', text: 'A', selector: 'a', rank: 3 },
+      { id: 'b', text: 'B', selector: 'b', rank: 3 }
+    ];
+    const delta = diff(nodes, nodes);
+
+    expect(delta.changed).toHaveLength(0);
+    expect(delta.appeared).toHaveLength(0);
+    expect(delta.disappeared).toHaveLength(0);
+  });
+
+  it('diff reports all nodes as appeared when prev is empty', () => {
+    const next: DistilledNode[] = [
+      { id: 'a', text: 'A', selector: 'a', rank: 3 },
+      { id: 'b', text: 'B', selector: 'b', rank: 3 }
+    ];
+    const delta = diff([], next);
+
+    expect(delta.appeared).toHaveLength(2);
+    expect(delta.changed).toHaveLength(0);
+    expect(delta.disappeared).toHaveLength(0);
+  });
+
+  it('diff reports all nodes as disappeared when next is empty', () => {
+    const prev: DistilledNode[] = [
+      { id: 'a', text: 'A', selector: 'a', rank: 3 },
+      { id: 'b', text: 'B', selector: 'b', rank: 3 }
+    ];
+    const delta = diff(prev, []);
+
+    expect(delta.disappeared).toHaveLength(2);
+    expect(delta.changed).toHaveLength(0);
+    expect(delta.appeared).toHaveLength(0);
+  });
 });

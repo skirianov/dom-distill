@@ -24,6 +24,7 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "text": "Acme Corp",
     "selector": "[data-testid=\"nav-home\"]",
     "rank": 6,
+    "confidence": 1.0,
     "attributes": { "testId": "nav-home", "href": "/" }
   },
   {
@@ -31,6 +32,7 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "text": "Pricing",
     "selector": "[data-testid=\"nav-pricing\"]",
     "rank": 6,
+    "confidence": 1.0,
     "attributes": { "testId": "nav-pricing", "href": "/pricing" }
   },
   {
@@ -38,12 +40,14 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "text": "Start free trial",
     "selector": "button[aria-label=\"Start free trial\"]",
     "rank": 3,
+    "confidence": 0.7,
     "attributes": { "type": "button" }
   },
   {
     "id": "dom-node-mmeytkdf-21",
     "selector": "#email",
     "rank": 6,
+    "confidence": 0.9,
     "attributes": { "name": "email", "placeholder": "you@example.com", "type": "email" }
   },
   {
@@ -51,11 +55,12 @@ If you feed `dom-distill` a typical noisy marketing page with a hero, hidden SVG
     "text": "Subscribe",
     "selector": "form#newsletter-form > button",
     "rank": 3,
+    "confidence": 0.3,
     "attributes": { "type": "submit" }
   }
 ]
 ```
-*Notice how deterministic CSS selectors are automatically generated so the LLM can easily reply with an action: `click("[data-testid=\"nav-pricing\"]")`.*
+*Each node includes a `confidence` score (0–1) indicating selector stability, and deterministic CSS selectors the LLM can use directly: `click("[data-testid=\"nav-pricing\"]")`.*
 
 ## Install
 
@@ -91,8 +96,8 @@ const delta = diff(nodes, nextNodes);
 | Function | Description |
 |---|---|
 | `distill(root?, config?)` | Synchronous single-pass DOM → tree |
-| `distillAsync(root?, config?)` | Same, but via `requestIdleCallback` (non-blocking) |
-| `metrics(tree)` | Aggregate stats: node count, depth, forms, nav elements |
+| `distillAsync(root?, config?)` | Chunked async traversal via `requestIdleCallback` (non-blocking) |
+| `metrics(tree)` | Aggregate stats: node count, depth, branching factor, forms, nav |
 
 ### Filtering
 
@@ -124,7 +129,8 @@ const delta = diff(nodes, nextNodes);
 
 - **Single-pass construction** — One DFS walk builds the tree with selectors, semantic tags, visibility checks, and action type detection. No second pass.
 - **InteractionRank scoring** — Each node gets a 0–10+ score based on tag semantics, ARIA roles, attributes, and visibility. Only high-value nodes survive filtering.
-- **Cooperative scheduling** — `distillAsync` / `filterAsync` use `requestIdleCallback` with 5ms time budgets. The main thread never blocks, even on 10k-node DOMs.
+- **Selector confidence** — Every node receives a 0–1 stability score reflecting how likely the generated selector is to survive DOM mutations: `data-testid` → 1.0, `id` → 0.9, `name` → 0.8, `aria-label` → 0.7, structural fallback → 0.3.
+- **Cooperative scheduling** — `distillAsync` performs genuinely chunked traversal, yielding every 50 nodes via `requestIdleCallback` (5ms budget). The main thread never blocks, even on 10k-node DOMs.
 - **Fingerprint-based diffing** — Stable node hashes enable three-way diffs (changed/appeared/disappeared) for incremental LLM updates instead of full-tree resends.
 - **React Fiber integration** — Optional `enhanceTreeWithFiber()` walks the internal Fiber tree to extract component names, sanitized props, and structural patterns (forms, modals, portals). Fully tree-shakeable — doesn't ship if you don't import it.
 

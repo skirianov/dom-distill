@@ -90,6 +90,29 @@ const buildSelector = (element: Element, context: SelectorContext): string => {
   return parts.join(' > ');
 };
 
+/**
+ * Compute a selector stability confidence score (0–1).
+ *
+ * Higher scores indicate more stable selectors that are unlikely to break
+ * across DOM mutations or page reloads.
+ */
+const selectorConfidence = (element: Element): number => {
+  if (element.getAttribute('data-testid') ?? element.getAttribute('data-aid')) {
+    return 1.0;
+  }
+  if (element.getAttribute('id')) {
+    return 0.9;
+  }
+  if (element.getAttribute('name')) {
+    return 0.8;
+  }
+  if (element.getAttribute('aria-label')) {
+    return 0.7;
+  }
+  // Structural fallback (nth-of-type) is fragile
+  return 0.3;
+};
+
 const isElementVisible = (element: Element, includeInvisible: boolean): boolean => {
   if (includeInvisible) return true;
 
@@ -256,7 +279,7 @@ export const distill = (
       text,
       interactive,
       actionType,
-      confidence: interactive ? 1 : 0,
+      confidence: selectorConfidence(element),
       selector,
       children: [],
       parent,
@@ -293,12 +316,16 @@ export const distill = (
   return tree;
 };
 
+/** Number of nodes to process per scheduler chunk before yielding. */
+const ASYNC_CHUNK_SIZE = 50;
+
 /**
  * Asynchronously distill a DOM subtree using cooperative scheduling.
  *
- * Uses `requestIdleCallback` (with a 5ms time budget per chunk) to avoid
- * blocking the main thread. Ideal for large DOMs where synchronous
- * distillation would cause jank.
+ * Performs a genuinely chunked traversal: the DFS walk yields control
+ * back to the main thread every {@link ASYNC_CHUNK_SIZE} nodes via
+ * `requestIdleCallback` (5ms time budget). This prevents jank even
+ * on 10k+ node DOMs.
  *
  * @param root - The root element to distill (defaults to `document.body`)
  * @param config - Optional configuration for depth limits, node caps, etc.
@@ -313,14 +340,132 @@ export const distillAsync = async (
   root: Element = document.body,
   config: TreeDistillerConfig = {}
 ): Promise<DOMTreeNode> => {
+  const {
+    maxDepth = DEFAULT_MAX_DEPTH,
+    maxNodes = DEFAULT_MAX_NODES,
+    includeInvisible = false,
+    prioritySelectors = [],
+    semanticAnalysis = true
+  } = config;
+
   return schedule(
     { priority: config.async === false ? 'immediate' : 'idle' },
     function* (): Generator<TaskProgress, DOMTreeNode, void> {
-      const tree = distill(root, config);
-      yield { type: 'progress', processed: 1, total: 1 };
-      return tree;
+      const idGenerator = createIdGenerator();
+      let nodeCount = 0;
+
+      const context: SelectorContext = { prioritySelectors };
+
+      // Stack-based DFS: each entry is [element, depth, parentNode]
+      type StackEntry = { element: Element; depth: number; parent?: DOMTreeNode };
+      const rootNode = buildNodeShallow(root, 0, undefined, idGenerator, context, includeInvisible, semanticAnalysis);
+      if (!rootNode) {
+        throw new Error('Failed to distill DOM tree');
+      }
+      nodeCount += 1;
+
+      // Seed the stack with root's children (reverse order for correct DFS)
+      const stack: StackEntry[] = [];
+      const rootChildren = Array.from(root.children);
+      for (let i = rootChildren.length - 1; i >= 0; i--) {
+        stack.push({ element: rootChildren[i]!, depth: 1, parent: rootNode });
+      }
+
+      while (stack.length > 0 && nodeCount < maxNodes) {
+        // Process a chunk of nodes, then yield
+        const chunkEnd = Math.min(ASYNC_CHUNK_SIZE, stack.length);
+        for (let c = 0; c < chunkEnd && stack.length > 0 && nodeCount < maxNodes; c++) {
+          const { element, depth, parent } = stack.pop()!;
+          if (depth > maxDepth) continue;
+
+          const node = buildNodeShallow(element, depth, parent, idGenerator, context, includeInvisible, semanticAnalysis);
+          if (!node) continue;
+
+          nodeCount += 1;
+          if (parent) {
+            parent.children.push(node);
+          }
+
+          // Push children in reverse for correct traversal order
+          const kids = Array.from(element.children);
+          for (let i = kids.length - 1; i >= 0; i--) {
+            stack.push({ element: kids[i]!, depth: depth + 1, parent: node });
+          }
+        }
+
+        yield { type: 'progress', processed: nodeCount, total: maxNodes };
+      }
+
+      return rootNode;
     }
   );
+};
+
+/**
+ * Build a single DOMTreeNode without recursing into children.
+ * Used by `distillAsync` for chunked traversal.
+ */
+const buildNodeShallow = (
+  element: Element,
+  depth: number,
+  parent: DOMTreeNode | undefined,
+  idGenerator: () => string,
+  context: SelectorContext,
+  includeInvisible: boolean,
+  semanticAnalysis: boolean
+): DOMTreeNode | null => {
+  const visible = isElementVisible(element, includeInvisible);
+  const rect = getRect(element);
+  const id = idGenerator();
+  const text =
+    element.getAttribute('aria-label') ??
+    element.getAttribute('aria-description') ??
+    getDirectText(element);
+
+  const interactive = isInteractive(element);
+  const actionType = detectActionType(element);
+
+  const attributes: DOMTreeNode['attributes'] = {
+    testId: element.getAttribute('data-testid') ?? undefined,
+    id: element.getAttribute('id') ?? undefined,
+    name: element.getAttribute('name') ?? undefined,
+    role: element.getAttribute('role') ?? undefined,
+    ariaLabel: element.getAttribute('aria-label') ?? undefined,
+    ariaDescription: element.getAttribute('aria-description') ?? undefined,
+    ariaExpanded: element.getAttribute('aria-expanded') ?? undefined,
+    ariaChecked: element.getAttribute('aria-checked') ?? undefined,
+    ariaCurrent: element.getAttribute('aria-current') ?? undefined,
+    placeholder: element.getAttribute('placeholder') ?? undefined,
+    value: (element as HTMLInputElement).value ?? undefined,
+    type: element.getAttribute('type') ?? undefined,
+    disabled: element.hasAttribute('disabled') || undefined,
+    href: element.getAttribute('href') ?? undefined
+  };
+
+  const selector = buildSelector(element, context);
+
+  const node: DOMTreeNode = {
+    id,
+    tag: element.tagName.toLowerCase(),
+    text,
+    interactive,
+    actionType,
+    confidence: selectorConfidence(element),
+    selector,
+    children: [],
+    parent,
+    depth,
+    visible,
+    rect,
+    attributes,
+    element: new WeakRef(element)
+  };
+
+  if (semanticAnalysis) {
+    node.semantic = analyzeSemantic(element);
+  }
+
+  return node;
 };
 
 /**
@@ -351,7 +496,13 @@ export const metrics = (tree: DOMTreeNode): TreeMetrics => {
 
   traverse(tree);
 
-  const avgBranchingFactor = totalNodes > 1 ? (totalNodes - 1) / totalNodes : 0;
+  let nonLeafNodes = 0;
+  const countNonLeaves = (node: DOMTreeNode) => {
+    if (node.children.length > 0) nonLeafNodes += 1;
+    for (const child of node.children) countNonLeaves(child);
+  };
+  countNonLeaves(tree);
+  const avgBranchingFactor = nonLeafNodes > 0 ? (totalNodes - 1) / nonLeafNodes : 0;
 
   return {
     totalNodes,
@@ -402,7 +553,7 @@ const decompressNode = (
     text: node.text,
     interactive: node.interactive,
     actionType: undefined,
-    confidence: node.interactive ? 1 : 0,
+    confidence: 0, // Cannot reconstruct selector stability without original DOM
     selector: node.selector,
     children: [],
     parent,
@@ -422,6 +573,12 @@ const decompressNode = (
  *
  * Re-establishes parent references and default values for fields
  * that were stripped during compression.
+ *
+ * @remarks
+ * The `confidence` field is set to `0` on decompressed nodes because
+ * the selector stability score cannot be recomputed without access to
+ * the original DOM element. Use the `selector` field directly if you
+ * need to act on the decompressed tree.
  *
  * @param tree - The compressed tree data
  * @returns A fully-linked `DOMTreeNode` tree

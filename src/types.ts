@@ -13,6 +13,17 @@ export interface DOMTreeNode {
   text?: string;
   interactive: boolean;
   actionType?: ActionType;
+  /**
+   * Selector stability score (0–1).
+   *
+   * Indicates how likely the generated `selector` is to remain stable
+   * across DOM mutations and page reloads:
+   * - `1.0` — `data-testid` / `data-aid` (test-anchored, most stable)
+   * - `0.9` — `id` (stable, but can be dynamically generated)
+   * - `0.8` — `name` attribute (form elements, generally stable)
+   * - `0.7` — `aria-label` (descriptive, but content may change)
+   * - `0.3` — Structural fallback via `nth-of-type` (fragile, DOM-dependent)
+   */
   confidence: number;
   selector: string;
   children: DOMTreeNode[];
@@ -48,6 +59,14 @@ export interface DOMTreeNode {
     href?: string;
   };
   fingerprint?: string;
+  /**
+   * Weak reference to the original DOM element.
+   *
+   * @remarks
+   * `WeakRef` does **not** survive `JSON.stringify()`. If you need to
+   * serialize the tree, use {@link compress} which strips this field
+   * and produces a JSON-safe `CompressedTree`.
+   */
   element?: WeakRef<Element>;
 }
 
