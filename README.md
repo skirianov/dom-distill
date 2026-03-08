@@ -2,6 +2,8 @@
 
 Token-efficient DOM-to-tree distiller for LLMs and browser automation.
 
+![dom-distill demo](examples/demo-dom-distill.gif)
+
 ## The Problem
 
 AI agents that browse the web (AutoGPT, Skyvern, browser-use, etc.) hit the same bottleneck: **bloated DOMs.**
@@ -174,6 +176,23 @@ Or point it at any URL:
 ```bash
 npx tsx examples/demo.ts https://stripe.com
 ```
+
+### AI Agent Cookbook
+
+Build a complete browser agent that uses an LLM to decide actions:
+
+```bash
+# Set your API key (works with OpenRouter, OpenAI, or any compatible endpoint)
+OPENROUTER_API_KEY=sk-or-... npx tsx examples/agent-loop.ts
+
+# Custom task
+OPENROUTER_API_KEY=sk-or-... npx tsx examples/agent-loop.ts "Go to github.com and find trending repositories"
+
+# Use a different model
+MODEL=anthropic/claude-sonnet-4 OPENROUTER_API_KEY=sk-or-... npx tsx examples/agent-loop.ts
+```
+
+The agent opens a **visible browser**, distills the page, asks the LLM what to do, executes the action, and repeats — so you can watch it work in real-time. See [`examples/agent-loop.ts`](examples/agent-loop.ts) for the full source (~180 lines).
 
 ## Zero Dependencies
 
